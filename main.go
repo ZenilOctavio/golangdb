@@ -25,7 +25,11 @@ func main() {
 		log.Fatalf("Couldn't register model %v", projectModelName)
 	}
 
-	engine.AddModel(ProjectModel)
+	err = engine.AddModel(ProjectModel)
+
+	if err != nil {
+		log.Printf("Couldnt add a model to the db | %v", err)
+	}
 	log.Printf("Project model was initialized")
 
 }

@@ -7,16 +7,23 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path"
 )
 
 var dataDir string = "csv_data"
+var fileNameFormat string = "%v.csv"
 
 type CSV_Engine struct {
-	directory fs.FS
-	models    map[string]i.Model
+	directory     fs.FS
+	models        map[string]i.Model
+	modelsSources map[string]*os.File
 }
 
 var IsNotDir error = errors.New(fmt.Sprintf("There is a file with the same name as the data directory %v", dataDir))
+
+func (e *CSV_Engine) isInitialized() bool {
+	return e.directory != nil
+}
 
 // This function checks for the existence of the data directory for the CSVEngine and then returns it.
 func CreateCSVEngine() (*CSV_Engine, error) {
@@ -48,27 +55,62 @@ func CreateCSVEngine() (*CSV_Engine, error) {
 
 	csvEngine := new(CSV_Engine)
 	csvEngine.models = make(map[string]i.Model)
+	csvEngine.modelsSources = make(map[string]*os.File)
 	csvEngine.directory = directory
 
 	return csvEngine, nil
 }
 
-var EngineNotInitialized = errors.New("The engine hasnt been initialized correctly")
+type addingModelErrorMessage uint32
 
-func setUpModel(model i.Model) error {
-	fmt.Printf("Setting up model %v | %v\n", model.GetName(), model.GetShape())
+const (
+	ENGINE_NOT_INITIALIZED addingModelErrorMessage = iota
+	DIR_INSTEAD_OF_FILE
+)
+
+var setUpModelsErrMessages = []string{
+	"The engine hasnt been initialized correctly when adding model %v",
+	"The file %v used as data source for model %v is a directory",
+}
+
+func (e *CSV_Engine) setUpModel(modelp *i.Model) error {
+	model := *modelp
+	filename := path.Join(dataDir, fmt.Sprintf(fileNameFormat, model.GetName()))
+
+	existingFile, err := os.Stat(filename)
+
+	if err == nil {
+		if existingFile.IsDir() {
+			return errors.New(fmt.Sprintf(setUpModelsErrMessages[DIR_INSTEAD_OF_FILE], filename, model.GetName()))
+		}
+		log.Printf("Checking if there are new changes in model %v", model.GetName())
+	}
+
+	if os.IsNotExist(err) {
+		file, err := os.Create(filename)
+
+		if err != nil {
+			return err
+		}
+
+		e.modelsSources[model.GetName()] = file
+		log.Printf("New model registered %v", model.GetName())
+		return nil
+
+	}
+
 	return nil
 }
 
 func (e *CSV_Engine) AddModel(model i.Model) error {
-	if e.directory == nil {
-		return EngineNotInitialized
+	if !e.isInitialized() {
+		return errors.New(fmt.Sprintf(setUpModelsErrMessages[ENGINE_NOT_INITIALIZED], model.GetName()))
 	}
 
 	_, ok := e.models[model.GetName()]
 
 	if !ok {
-		err := setUpModel(model)
+		err := e.setUpModel(&model)
 
 		if err != nil {
 			return err
@@ -76,6 +118,5 @@ func (e *CSV_Engine) AddModel(model i.Model) error {
 		e.models[model.GetName()] = model
 	}
 
-	log.Printf("A model with the name %v is already registered.", model.GetName())
 	return nil
 }
